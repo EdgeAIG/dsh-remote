@@ -33,13 +33,17 @@ but two things still resolved that removed route:
 
 ## OpenCode Zen bridge (opt-in, dsh-remote-web only)
 
-`0002-Add-opt-in-DSH-OpenCode-Zen-bridge.patch` adds the
+`0002-Add-opt-in-DSH-OpenCode-Zen-bridge.patch` and
+`0004-Restrict-OpenCode-Zen-bridge-to-the-model-adapter-on.patch` add the
 `DHS-M/dsh-opencode-zen` integration to the scratch installer behind
-`OPENCODE_ZEN=1`. It installs `@deepseek-ai/dsh-llm-opencode` (standalone
-adapter) and `@deepseek-ai/dsh-web-search-exa-mcp` (anonymous Exa MCP web
-search), registers them in the bundle manifests and host TS references, points
-the default model at `opencode-zen` / `big-pickle`, and removes the adapter's
-`export default apply` (which otherwise breaks the DSH Cordis loader).
+`OPENCODE_ZEN=1`. The bridge installs **only** the standalone
+`@deepseek-ai/dsh-llm-opencode` model adapter (web-search plugins are
+intentionally excluded), registers it in the bundle manifests and host TS
+references, points the default model at `opencode-zen` / `big-pickle`, and
+normalizes the adapter: it removes `export default apply` (which otherwise
+breaks the DSH Cordis loader) and rewrites the SSE tool-call name accumulation
+(`state.name += raw.function.name`) to an overwrite, which otherwise records
+`web_searchweb_search` and rejects every model tool call.
 
 ## Apply
 
@@ -72,6 +76,9 @@ If `git am` requires an identity, add your own `--signoff` or apply with
 - `dsh web --host 0.0.0.0 --open-authority --no-open` boots with the OpenCode
   bridge and serves on port 3080.
 
-The sandbox cannot reach `opencode.ai` (egress blocked), so live Zen traffic was
-verified against a local OpenAI-compatible mock on `127.0.0.1:8791`; the real
-endpoint must be tested on a machine with outbound access.
+The sandbox cannot reach `opencode.ai` (egress blocked), so no live Zen traffic
+was run here; the adapter route (`opencode-zen` / `big-pickle`) boots and
+registers, and the tool-call/schema and subagent route-inheritance behavior was
+verified against a temporary local stand-in that has since been deleted. The
+real endpoint must be tested on a machine with outbound access; the product
+integration does not ship or require any mock.
