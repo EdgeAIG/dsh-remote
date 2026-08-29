@@ -1,0 +1,133 @@
+From 4892097d0a2af67d07d20690bcad3f965fae8fb4 Mon Sep 17 00:00:00 2001
+From: arena-ai-coding-agent <arena-ai-coding-agent@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 07:38:21 +0000
+Subject: [PATCH 5/5] Point OpenCode Zen adapter directly at the anonymous Zen
+ route
+
+The installer was wiring the adapter to the loopback shim (127.0.0.1:8791),
+so a normal install failed at the first completion unless the operator also
+ran zen_shim.js. Configure the bridge to talk directly to
+https://opencode.ai/zen/v1 (anonymous, no API key), normalize the adapter
+source so its own default matches, and include the failing endpoint URL in
+TRANSPORT errors so unreachable/blocked upstreams are diagnosable. The shim
+remains available as an optional baseURL override.
+---
+ README.md                     |  6 +++---
+ docs/index.html               |  5 ++---
+ install.sh                    |  8 +++++---
+ tools/enable-opencode-zen.mjs | 19 ++++++++++++++++---
+ 4 files changed, 26 insertions(+), 12 deletions(-)
+
+diff --git a/README.md b/README.md
+index 1fca0d9..9048d15 100644
+--- a/README.md
++++ b/README.md
+@@ -23,19 +23,19 @@ BUILD=0 ./install.sh "$HOME/dsh-remote-web"
+ 
+ ### Opt-in OpenCode Zen bridge
+ 
+-Pass `OPENCODE_ZEN=1` to also add the [DSH OpenCode Zen bridge](https://github.com/DHS-M/dsh-opencode-zen) from the same organization. It installs only the standalone `@deepseek-ai/dsh-llm-opencode` model adapter and points the default agent model at `opencode-zen` / `big-pickle` through a local loopback route. Web-search plugins are intentionally excluded.
++Pass `OPENCODE_ZEN=1` to also add the [DSH OpenCode Zen bridge](https://github.com/DHS-M/dsh-opencode-zen) from the same organization. It installs only the standalone `@deepseek-ai/dsh-llm-opencode` model adapter and points the default agent model at `opencode-zen` / `big-pickle` (anonymous, no API key) directly against `https://opencode.ai/zen/v1`. Web-search plugins are intentionally excluded.
+ 
+ ```bash
+ OPENCODE_ZEN=1 BUILD=1 ./install.sh "$HOME/dsh-remote-web"
+ ```
+ 
+-Start the Zen shim (or any OpenAI-compatible endpoint) before using the route:
++The adapter needs no local shim by default. If your network blocks `opencode.ai` or you prefer the repo's loopback shim, point the adapter's `baseURL` at `http://127.0.0.1:8791/v1` and run:
+ 
+ ```bash
+ node <dsh-opencode-zen>/zen_shim.js
+ ```
+ 
+-If you are not calling the real OpenCode Zen endpoint, the bridge still works against an OpenAI-compatible `/v1` server bound to `http://127.0.0.1:8791`.
++For any other OpenAI-compatible `/v1` server, set `baseURL` to that endpoint.
+ 
+ The enable step also normalizes the upstream standalone adapter's SSE tool-call name handling (`state.name += …` → `state.name = …`). Without that fix a normal one-chunk `web_search` tool call is recorded as `web_searchweb_search` and rejected as an unknown tool. The adapter still removes the DSH-incompatible `export default apply` so the Cordis loader reads its named `inject`/`name` metadata.
+ 
+diff --git a/docs/index.html b/docs/index.html
+index d8b7e0c..174b528 100644
+--- a/docs/index.html
++++ b/docs/index.html
+@@ -20,9 +20,8 @@
+   <pre><code>curl -fsSL https://raw.githubusercontent.com/DHS-M/dsh-remote-web/main/install.sh -o install.sh
+ chmod +x install.sh
+ BUILD=1 ./install.sh "$HOME/dsh-remote-web"</code></pre>
+-  <p>Add the DSH OpenCode Zen bridge from the same organization with <code>OPENCODE_ZEN=1</code>. It installs only the standalone <code>@deepseek-ai/dsh-llm-opencode</code> model adapter and points the default model at <code>opencode-zen</code> / <code>big-pickle</code> through a local loopback route. Web-search plugins are excluded:</p>
+-  <pre><code>OPENCODE_ZEN=1 BUILD=1 ./install.sh "$HOME/dsh-remote-web"
+-node &lt;dsh-opencode-zen&gt;/zen_shim.js</code></pre>
++  <p>Add the DSH OpenCode Zen bridge from the same organization with <code>OPENCODE_ZEN=1</code>. It installs only the standalone <code>@deepseek-ai/dsh-llm-opencode</code> model adapter and points the default model at <code>opencode-zen</code> / <code>big-pickle</code> (anonymous, no API key) directly against <code>https://opencode.ai/zen/v1</code>. Web-search plugins are excluded. No local shim is required; set <code>baseURL</code> to <code>http://127.0.0.1:8791/v1</code> and run <code>node &lt;dsh-opencode-zen&gt;/zen_shim.js</code> only if your network blocks <code>opencode.ai</code>:</p>
++  <pre><code>OPENCODE_ZEN=1 BUILD=1 ./install.sh "$HOME/dsh-remote-web"</code></pre>
+   <h2>Run the browser interface</h2>
+   <pre><code>cd "$HOME/dsh-remote-web"
+ pnpm dsh web --host 0.0.0.0 --open-authority --no-open</code></pre>
+diff --git a/install.sh b/install.sh
+index 80f52b5..81040fc 100755
+--- a/install.sh
++++ b/install.sh
+@@ -71,10 +71,12 @@ if [[ "$OPENCODE_ZEN" == "1" ]]; then
+ 
+ OpenCode Zen bridge is enabled. To use it:
+ 
+-  1. Start the local shim (or your own OpenAI-compatible endpoint):
+-       node <dsh-opencode-zen>/zen_shim.js
+-  2. Run the web interface:
++  1. Run the web interface:
+        pnpm dsh web --host 0.0.0.0 --open-authority --no-open
++  2. The adapter talks directly to https://opencode.ai/zen/v1 (anonymous,
++     no API key). If your network blocks it or you prefer the repo's optional
++     loopback shim, set baseURL to http://127.0.0.1:8791/v1 and run:
++       node <dsh-opencode-zen>/zen_shim.js
+   3. The default agent model is opencode-zen / big-pickle (see the Models
+      page if you want a different free model).
+ 
+diff --git a/tools/enable-opencode-zen.mjs b/tools/enable-opencode-zen.mjs
+index bfcb701..6392160 100644
+--- a/tools/enable-opencode-zen.mjs
++++ b/tools/enable-opencode-zen.mjs
+@@ -61,11 +61,11 @@ base = base
+ if (!base.includes('id: llm-opencode')) {
+   const anchor = '    - id: llm-pi-ai\n      name: \'@deepseek-ai/dsh-llm-pi-ai\'\n'
+   const rows = anchor + `
+-    # OpenCode Zen bridge: local shim-backed free-model adapter (DHS-M/dsh-opencode-zen).
++    # OpenCode Zen bridge: direct anonymous free-model adapter (DHS-M/dsh-opencode-zen).
+     - id: llm-opencode
+       name: '@deepseek-ai/dsh-llm-opencode'
+       config:
+-        baseURL: http://127.0.0.1:8791/v1
++        baseURL: https://opencode.ai/zen/v1
+         autoDiscover: true
+         freeOnly: true
+         models:
+@@ -85,14 +85,27 @@ mkdirSync(join(root, 'packages/llm/llm-opencode'), { recursive: true })
+ // chunks (`state.name += raw.function.name`), so a normal one-chunk tool name
+ // becomes `web_searchweb_search` and every call fails as an unknown tool. The
+ // adapter must overwrite the name, matching the DeepSeek translation path.
++// It also ships with a loopback-shim default, so point the adapter directly at
++// OpenCode Zen's anonymous route and include the failing URL in transport
++// errors instead of a vague "request failed".
+ const adapterDir = join(root, 'packages/llm/llm-opencode')
+ for (const rel of ['src/index.ts', 'lib/index.js']) {
+   const file = join(adapterDir, rel)
+   if (!existsSync(file)) continue
+   const text = readFileSync(file, 'utf8')
+-  const updated = text
++  let updated = text
+     .replace('state.name += raw.function.name', 'state.name = raw.function.name')
+     .replace('state.name += raw.function.name;', 'state.name = raw.function.name;')
++    // Direct anonymous OpenCode Zen route.
++    updated = updated
++      .replace('DEFAULT_SHIM_BASE_URL = \'http://127.0.0.1:8791/v1\'', 'DEFAULT_BASE_URL = \'https://opencode.ai/zen/v1\'')
++      .replace('DEFAULT_SHIM_BASE_URL', 'DEFAULT_BASE_URL')
++    // Surface the actual endpoint in transport failures.
++    updated = updated
++      .replace('throw new LlmError(\'OpenCode Zen request failed\', \'TRANSPORT\', { cause: error })',
++               'throw new LlmError(`OpenCode Zen request failed for ${completionURL(config.baseURL)}`, \'TRANSPORT\', { cause: error })')
++      .replace('throw new LlmError("OpenCode Zen request failed", "TRANSPORT", { cause: error })',
++               'throw new LlmError(`OpenCode Zen request failed for ${completionURL(config.baseURL)}`, "TRANSPORT", { cause: error })')
+   if (updated !== text) writeFileSync(file, updated)
+ }
+ 
+-- 
+2.39.5
+

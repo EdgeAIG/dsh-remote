@@ -1,7 +1,7 @@
 From b021ba228d34f0a1b98ab2602185d0afa23884b7 Mon Sep 17 00:00:00 2001
 From: arena-ai-coding-agent <arena-ai-coding-agent@users.noreply.github.com>
 Date: Sat, 29 Aug 2026 07:29:09 +0000
-Subject: [PATCH 4/4] Restrict OpenCode Zen bridge to the model adapter only
+Subject: [PATCH 4/5] Restrict OpenCode Zen bridge to the model adapter only
 
 Drop the anonymous Exa MCP web-search plugin from the OPENCODE_ZEN=1
 integration so the bridge installs and activates only

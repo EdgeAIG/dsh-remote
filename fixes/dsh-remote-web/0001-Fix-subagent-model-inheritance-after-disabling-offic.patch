@@ -1,7 +1,7 @@
 From a5713483ee2ec3b6593cbe90ca3d7f3b25823bfe Mon Sep 17 00:00:00 2001
 From: arena-ai-coding-agent <arena-ai-coding-agent@users.noreply.github.com>
 Date: Sat, 29 Aug 2026 06:40:38 +0000
-Subject: [PATCH 1/4] Fix subagent model inheritance after disabling official
+Subject: [PATCH 1/5] Fix subagent model inheritance after disabling official
  DeepSeek adapter
 
 In-process subagents were inheriting the create-time agent options, which

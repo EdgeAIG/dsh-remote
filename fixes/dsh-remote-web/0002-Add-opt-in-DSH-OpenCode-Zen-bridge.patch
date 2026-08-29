@@ -1,7 +1,7 @@
 From 8c554e68a83b6510c9412794ba50de09511fc96e Mon Sep 17 00:00:00 2001
 From: arena-ai-coding-agent <arena-ai-coding-agent@users.noreply.github.com>
 Date: Sat, 29 Aug 2026 07:09:44 +0000
-Subject: [PATCH 2/4] Add opt-in DSH OpenCode Zen bridge
+Subject: [PATCH 2/5] Add opt-in DSH OpenCode Zen bridge
 
 ONCODE_ZEN=1 now installs the DHS-M/dsh-opencode-zen integration alongside the
 product patch:

@@ -33,17 +33,21 @@ but two things still resolved that removed route:
 
 ## OpenCode Zen bridge (opt-in, dsh-remote-web only)
 
-`0002-Add-opt-in-DSH-OpenCode-Zen-bridge.patch` and
-`0004-Restrict-OpenCode-Zen-bridge-to-the-model-adapter-on.patch` add the
+`0002-Add-opt-in-DSH-OpenCode-Zen-bridge.patch`,
+`0004-Restrict-OpenCode-Zen-bridge-to-the-model-adapter-on.patch`, and
+`0005-Point-OpenCode-Zen-adapter-directly-at-the-anonymous.patch` add the
 `DHS-M/dsh-opencode-zen` integration to the scratch installer behind
 `OPENCODE_ZEN=1`. The bridge installs **only** the standalone
 `@deepseek-ai/dsh-llm-opencode` model adapter (web-search plugins are
 intentionally excluded), registers it in the bundle manifests and host TS
 references, points the default model at `opencode-zen` / `big-pickle`, and
-normalizes the adapter: it removes `export default apply` (which otherwise
-breaks the DSH Cordis loader) and rewrites the SSE tool-call name accumulation
-(`state.name += raw.function.name`) to an overwrite, which otherwise records
-`web_searchweb_search` and rejects every model tool call.
+targets OpenCode Zen's anonymous route directly at `https://opencode.ai/zen/v1`
+(no local shim required). It normalizes the adapter: removes `export default
+apply` (which otherwise breaks the DSH Cordis loader), rewrites the SSE tool-call
+name accumulation (`state.name += raw.function.name`) to an overwrite (which
+otherwise records `web_searchweb_search` and rejects every model tool call), and
+includes the failing endpoint URL in `TRANSPORT` errors instead of a vague
+"request failed".
 
 ## Apply
 
@@ -76,9 +80,12 @@ If `git am` requires an identity, add your own `--signoff` or apply with
 - `dsh web --host 0.0.0.0 --open-authority --no-open` boots with the OpenCode
   bridge and serves on port 3080.
 
-The sandbox cannot reach `opencode.ai` (egress blocked), so no live Zen traffic
-was run here; the adapter route (`opencode-zen` / `big-pickle`) boots and
-registers, and the tool-call/schema and subagent route-inheritance behavior was
-verified against a temporary local stand-in that has since been deleted. The
-real endpoint must be tested on a machine with outbound access; the product
-integration does not ship or require any mock.
+The sandbox cannot reach `opencode.ai` (egress blocked), so the real anonymous
+Zen endpoint could not be contacted here. The modified adapter was exercised
+against a temporary OpenAI-compatible reference server: `opencode-zen` /
+`big-pickle` completed a streamed turn (`OPENCODE_TEST_OK`), proving the
+adapter's HTTP/SSE path works after the modifications. The default route was
+also confirmed to target `https://opencode.ai/zen/v1` (the failure event now
+names that exact URL). The temporary reference server and all mock artifacts
+have been deleted; the product integration ships no mock. Real light traffic
+must still be tested on a machine with outbound access.

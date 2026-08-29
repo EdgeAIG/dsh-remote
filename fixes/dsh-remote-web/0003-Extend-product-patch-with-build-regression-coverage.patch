@@ -1,7 +1,7 @@
 From 8e9e112c346035c53ad9de7d3d8077b243416158 Mon Sep 17 00:00:00 2001
 From: arena-ai-coding-agent <arena-ai-coding-agent@users.noreply.github.com>
 Date: Sat, 29 Aug 2026 07:10:47 +0000
-Subject: [PATCH 3/4] Extend product patch with build/regression coverage
+Subject: [PATCH 3/5] Extend product patch with build/regression coverage
 
 The settings-document API added in the patch makes readDocument/writeDocument
 required on SettingsApi, but two host test fixtures in apiproxy still omitted
