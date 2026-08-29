@@ -49,3 +49,28 @@ git am subagent-model-inheritance-dsh-official-modifier.patch
 
 The signed-off-by footer is omitted; add your own identity if `git am`
 requires it, or use `git apply`.
+
+## Update: OpenCode Zen bridge (opt-in)
+
+`add-opencode-zen-bridge-dsh-remote-web.patch` adds the DSH OpenCode Zen bridge
+(DHS-M/dsh-opencode-zen) to the scratch installer as an opt-in. It:
+
+- installs `@deepseek-ai/dsh-llm-opencode` (standalone adapter) and
+  `@deepseek-ai/dsh-web-search-exa-mcp` (anonymous Exa MCP web search)
+- registers both in the base/web-app bundle manifests and host TS references
+- points the default agent model at `opencode-zen` / `big-pickle` (local shim)
+- removes the adapter's `export default apply`, which otherwise breaks the DSH
+  Cordis loader (`cannot get property "llm" without inject`)
+
+Apply on top of the subagent fix in a `dsh-remote-web` checkout:
+
+```bash
+git am add-opencode-zen-bridge-dsh-remote-web.patch
+```
+
+Then install with `OPENCODE_ZEN=1` and run `zen_shim.js` before `dsh web`.
+
+The standalone plugin was verified to boot on this sandbox at
+`127.0.0.1:8791` against a local OpenAI-compatible mock; the real
+`opencode.ai/zen` endpoint is not reachable from the sandbox (egress blocked),
+so live Zen traffic must be tested on your own network.
