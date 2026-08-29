@@ -1,0 +1,143 @@
+From 5cb56ad16f191e936f9a023574bf005888b9a751 Mon Sep 17 00:00:00 2001
+From: arena-ai-coding-agent <arena-ai-coding-agent@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 06:47:33 +0000
+Subject: [PATCH 1/2] Fix subagent model inheritance after disabling official
+ DeepSeek adapter
+
+The patch removes the official DeepSeek adapter from the active base
+composition, but agents and in-process subagents were still resolving the
+removed deepseek-official route as their default. Subagent children only
+inherited the creation-time parent options, so they failed with 'no
+adapter registered for provider deepseek-official' even when the parent
+session was using an available provider.
+
+- Repoint agent-default-model from the removed deepseek-official route to
+  the pi-ai deepseek route for the same model family.
+- Resolve child provider/model/maxTokens from the parent session's latest
+  request header (the live route actually used) before falling back to
+  creation-time options.
+---
+ README.md                             |  2 +-
+ docs/index.html                       |  4 +-
+ patches/open-authority-web-only.patch | 59 +++++++++++++++++++++++++--
+ 3 files changed, 59 insertions(+), 6 deletions(-)
+
+diff --git a/README.md b/README.md
+index 60fa76c..23f4e7b 100644
+--- a/README.md
++++ b/README.md
+@@ -46,7 +46,7 @@ cloudflared tunnel --url http://127.0.0.1:3080
+ 
+ The patch adds a centralized open-authority switch to the core connection transport and ApiProxy capability declaration. It propagates the server authority to the browser, keeps host-backed settings enabled for non-loopback callers, replaces the native configuration-file handoff with an in-page browser editor, and retains browser filesystem browsing for remote workspace selection.
+ 
+-The active base composition no longer mounts the DeepSeek chat provider or its DeepSeek web-search companion. Their source packages remain untouched so an official checkout or custom overlay can re-enable them intentionally.
++The active base composition no longer mounts the DeepSeek chat provider or its DeepSeek web-search companion. Their source packages remain untouched so an official checkout or custom overlay can re-enable them intentionally. The default agent model selection points at the pi-ai multi-provider `deepseek` route (the same model family) instead of the removed official adapter, and in-process subagents inherit the parent session's live model route from the latest request header rather than the creation-time deployment default. A delegated child therefore follows the provider/model selected for the parent session instead of failing with "no adapter registered for provider 'deepseek-official'" when that adapter is absent.
+ 
+ ## Documentation and patch contents
+ 
+diff --git a/docs/index.html b/docs/index.html
+index 808568f..a4e59c7 100644
+--- a/docs/index.html
++++ b/docs/index.html
+@@ -33,10 +33,10 @@ pnpm dsh web --host 0.0.0.0 --open-authority --no-open</code></pre>
+     <tr><td>Browser authority</td><td>Propagates the server authority marker so remote pages use host-backed settings.</td></tr>
+     <tr><td>Configuration file</td><td>Replaces the native desktop handoff with a browser editor over typed settings RPC.</td></tr>
+     <tr><td>Workspace selection</td><td>Uses the existing browser filesystem flow for remote directory listing and creation.</td></tr>
+-    <tr><td>DeepSeek provider</td><td>Removes the provider and its web-search companion from the active base composition while keeping source packages intact.</td></tr>
++    <tr><td>DeepSeek provider</td><td>Removes the official adapter and its web-search companion from the active base composition while keeping source packages intact; defaults use the pi-ai <code>deepseek</code> route.</td></tr>
+   </tbody></table>
+   <h2>Source and reproducibility</h2>
+-  <p>The exact change is in <code>patches/open-authority-web-only.patch</code>. The source baseline is pinned in <code>UPSTREAM-COMMIT.txt</code>. If the official project changes enough for the patch not to apply, review the patch manually rather than forcing it over local work.</p>
++  <p>The exact change is in <code>patches/open-authority-web-only.patch</code>. The source baseline is pinned in <code>UPSTREAM-COMMIT.txt</code>. In-process subagents inherit the parent session's live model route, so delegation follows the provider selected in the browser rather than a stale <code>deepseek-official</code> default. If the official project changes enough for the patch not to apply, review the patch manually rather than forcing it over local work.</p>
+   <footer><a href="../README.md">README</a> · <a href="https://github.com/deepseek-ai/deepseek-harness">Official upstream Harness</a></footer>
+ </main>
+ </body>
+diff --git a/patches/open-authority-web-only.patch b/patches/open-authority-web-only.patch
+index c1e2dc6..6c16983 100644
+--- a/patches/open-authority-web-only.patch
++++ b/patches/open-authority-web-only.patch
+@@ -103,10 +103,26 @@ index 6a5164f16040675df0821096b88e77c02d95d41c..be52667bb3ca4e67bf76faf2ba1a729b
+    WorkspaceId, WorkspaceView,
+  } from '@deepseek-ai/dsh-client-connection/client'
+ diff --git a/packages/bundle/base/cordis.patch.yml b/packages/bundle/base/cordis.patch.yml
+-index e9567d9206e5b8c64b40cf76b88619f383f2269e..880458c17b8c206d6ea3951465310f892a08312e 100644
++index e9567d9206e5b8c64b40cf76b88619f383f2269e..b627946021e0eb005df958571db286d3f37bb509 100644
+ --- a/packages/bundle/base/cordis.patch.yml
+ +++ b/packages/bundle/base/cordis.patch.yml
+-@@ -393,23 +393,10 @@
++@@ -59,11 +59,13 @@
++       name: '@deepseek-ai/dsh-agent'
++ 
++     # The transport-independent default for Agents created by entry points.
++-    # Settings may supply a saved selection; consumers read it at creation time.
+++    # The official DeepSeek adapter is not part of this active composition, so
+++    # the default points at the pi-ai multi-provider route for the same model
+++    # family. Settings may supply a saved selection; consumers read it live.
++     - id: agent-default-model
++       name: '@deepseek-ai/dsh-agent-default-model'
++       config:
++-        provider: deepseek-official
+++        provider: deepseek
++         model: deepseek-v4-flash
++ 
++     - id: jobs
++@@ -393,23 +395,10 @@
+          thresholds: [3, 5, 8]
+          argumentsPreviewChars: 500
+  
+@@ -132,7 +148,7 @@ index e9567d9206e5b8c64b40cf76b88619f383f2269e..880458c17b8c206d6ea3951465310f89
+  
+      - id: tool-web
+        name: '@deepseek-ai/dsh-tool-web'
+-@@ -442,10 +429,3 @@
++@@ -442,10 +431,3 @@
+      # overlay can pin another workspace.
+      - id: fs-sandbox
+        name: '@deepseek-ai/dsh-fs-sandbox'
+@@ -1930,6 +1946,43 @@ index 4150aa9a81c032bc8cca5363dd7ed2b2c7dbc1ab..32948d1b63e79fd832a6bb70848599d6
+    /**
+     * Prepare the provider's user-editable document for a native editor. File
+     * providers may materialize an absent document before returning its path;
++diff --git a/packages/subagent/subagent/src/child-agent.ts b/packages/subagent/subagent/src/child-agent.ts
++index 7582338858f470909494ef8640e06c4b09b81561..c6d538c25834d02faf7e3bb9c88a9c1e97b46337 100644
++--- a/packages/subagent/subagent/src/child-agent.ts
+++++ b/packages/subagent/subagent/src/child-agent.ts
++@@ -57,9 +57,17 @@ export function resolveChildDepth(parent: Agent, maxDepth: number | undefined):
++ }
++ 
++ /**
++- * Resolve the child's `AgentOptions`: the parent's provider/model/maxTokens
+++ * Resolve the child's `AgentOptions`: the parent's live provider/model/maxTokens
++  * route unless the request overrides it, stamped with the child's own
++  * delegation depth.
+++ *
+++ * The live route comes from the parent session's latest request header — the
+++ * route the parent actually used for its last completed request. Creation-time
+++ * `parent.options` only carry the entry point default, which can diverge from
+++ * the session-specific model selection a caller switched in the Web UI. Using
+++ * the live header keeps a child (and therefore a whole subagent delegation)
+++ * on the provider the parent user selected instead of falling back to a
+++ * disabled deployment default.
++  * @param parent - the delegating parent whose route the child inherits.
++  * @param requested - per-child overrides, if any.
++  * @param childDepth - the resolved delegation depth to stamp.
++@@ -70,9 +78,10 @@ export function resolveChildAgentOptions(
++   requested: AgentOptions | undefined,
++   childDepth: number,
++ ): AgentOptions {
++-  const parentProvider = parent.options.provider
++-  const parentModel = parent.options.model
++-  const parentMaxTokens = parent.options.maxTokens
+++  const liveRoute = parent.session.requestHeader()?.config
+++  const parentProvider = liveRoute?.provider ?? parent.options.provider
+++  const parentModel = liveRoute?.model ?? parent.options.model
+++  const parentMaxTokens = liveRoute?.maxTokens ?? parent.options.maxTokens
++   return {
++     ...parentProvider !== undefined ? { provider: parentProvider } : {},
++     ...parentModel !== undefined ? { model: parentModel } : {},
+ diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+ index 737a21eea64d9ab25ed35258719442ae55376710..bd366be6b0ae2e567e646ef1b5c92f4b61b75452 100644
+ --- a/pnpm-lock.yaml
+-- 
+2.39.5
+

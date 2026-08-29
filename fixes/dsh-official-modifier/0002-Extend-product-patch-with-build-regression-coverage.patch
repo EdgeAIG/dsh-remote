@@ -1,0 +1,115 @@
+From 922c7ab3f7ad8d7283d876817c053acce4b25ada Mon Sep 17 00:00:00 2001
+From: arena-ai-coding-agent <arena-ai-coding-agent@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 07:10:47 +0000
+Subject: [PATCH 2/2] Extend product patch with build/regression coverage
+
+The settings-document API added in the patch makes readDocument/writeDocument
+required on SettingsApi, but two host test fixtures in apiproxy still omitted
+them, so the shipped patch did not type-check. Add those fixture stubs and a
+focused subagent route-inheritance regression test.
+---
+ patches/open-authority-web-only.patch | 81 +++++++++++++++++++++++++++
+ 1 file changed, 81 insertions(+)
+
+diff --git a/patches/open-authority-web-only.patch b/patches/open-authority-web-only.patch
+index 6c16983..df999a9 100644
+--- a/patches/open-authority-web-only.patch
++++ b/patches/open-authority-web-only.patch
+@@ -1842,6 +1842,36 @@ index ac6c770801c498cd48220722790dfeefdf837227..f2d04ab6ffaa0e10045ccaa5397c20fa
+        ...(config.sessionExportCompressionLevel === undefined
+          ? {}
+          : { sessionExportCompressionLevel: config.sessionExportCompressionLevel }),
++diff --git a/packages/host/apiproxy/tests/client-handler.spec.ts b/packages/host/apiproxy/tests/client-handler.spec.ts
++index de9d4ddab097b831476ae4b3c3282b15aa9be8df..341b3e3f350dfc892e0f5765e5551016e71a529c 100644
++--- a/packages/host/apiproxy/tests/client-handler.spec.ts
+++++ b/packages/host/apiproxy/tests/client-handler.spec.ts
++@@ -111,6 +111,8 @@ function scriptedApi(overrides: {
++     settings: {
++       describe: r => ok(r, { writable: true, hasDocument: false, namespaces: [] }),
++       openDocument: r => ok(r, { opened: true as const }),
+++      readDocument: r => ok(r, { name: 'settings.yaml', format: 'yaml' as const, content: '' }),
+++      writeDocument: r => ok(r, { name: 'settings.yaml', format: 'yaml' as const, content: r.payload.content }),
++       update: err,
++       replace: err,
++       mutate: err,
++diff --git a/packages/host/apiproxy/tests/fetch-carrier.spec.ts b/packages/host/apiproxy/tests/fetch-carrier.spec.ts
++index 77432c55af83a07853285d012172f6186e5a75c0..c63abb08f382a408459ac258eb21fe281a54da9c 100644
++--- a/packages/host/apiproxy/tests/fetch-carrier.spec.ts
+++++ b/packages/host/apiproxy/tests/fetch-carrier.spec.ts
++@@ -250,6 +250,12 @@ function fakeApi(overrides: Partial<{ muxFrames: MuxFrame[]; hostFrames: HostFra
++       async openDocument(request) {
++         return { rpcId: request.rpcId, result: { ok: true, value: { opened: true as const } } }
++       },
+++      async readDocument(request) {
+++        return { rpcId: request.rpcId, result: { ok: true, value: { name: 'settings.yaml', format: 'yaml' as const, content: '' } } }
+++      },
+++      async writeDocument(request) {
+++        return { rpcId: request.rpcId, result: { ok: true, value: { name: 'settings.yaml', format: 'yaml' as const, content: request.payload.content } } }
+++      },
++       async update(request) {
++         return { rpcId: request.rpcId, result: { ok: false, error: { code: 'settings-rejected', message: 'stub', details: { ns: request.payload.ns } } } }
++       },
+ diff --git a/packages/settings/settings-file/src/index.ts b/packages/settings/settings-file/src/index.ts
+ index 0a37fd866ffb40e8fa8499c804dde0785d269773..0288dcc3fdeccc0e88eb2d2eb99bf354e2227591 100644
+ --- a/packages/settings/settings-file/src/index.ts
+@@ -1983,6 +2013,57 @@ index 7582338858f470909494ef8640e06c4b09b81561..c6d538c25834d02faf7e3bb9c88a9c1e
+    return {
+      ...parentProvider !== undefined ? { provider: parentProvider } : {},
+      ...parentModel !== undefined ? { model: parentModel } : {},
++diff --git a/packages/subagent/subagent/tests/child-agent-route.spec.ts b/packages/subagent/subagent/tests/child-agent-route.spec.ts
++new file mode 100644
++index 0000000000000000000000000000000000000000..c5d4be26180eb561e185a937bfb0f9301047d1a5
++--- /dev/null
+++++ b/packages/subagent/subagent/tests/child-agent-route.spec.ts
++@@ -0,0 +1,45 @@
+++/**
+++ * Focused pin for the subagent model-route inheritance fix:
+++ * `resolveChildAgentOptions` must prefer the parent session's live request
+++ * header (the route the parent actually used) over the creation-time
+++ * `parent.options` that may carry a stale deployment default.
+++ */
+++
+++import { describe, expect, it } from 'vitest'
+++import { resolveChildAgentOptions } from '../src/child-agent.ts'
+++import type { Agent } from '@deepseek-ai/dsh-agent'
+++
+++type Parent = Pick<Agent, 'options'> & { session: { requestHeader: () => { config: { provider: string; model: string; maxTokens?: number } } | undefined } }
+++
+++function makeParent(options: Agent['options'], header?: { provider: string; model: string; maxTokens?: number }): Parent {
+++  return {
+++    options: options ?? { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+++    session: { requestHeader: () => header === undefined ? undefined : { config: header } },
+++  }
+++}
+++
+++describe('resolveChildAgentOptions live-route inheritance', () => {
+++  it('prefers the parent session live route over creation-time options', () => {
+++    const parent = makeParent(
+++      { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+++      { provider: 'deepseek', model: 'deepseek-v4-pro', maxTokens: 777 },
+++    )
+++    const resolved = resolveChildAgentOptions(parent, undefined, 2)
+++    expect(resolved).toEqual({ provider: 'deepseek', model: 'deepseek-v4-pro', maxTokens: 777, subagentDepth: 2 })
+++  })
+++
+++  it('falls back to creation-time options when the session has no request header', () => {
+++    const parent = makeParent({ provider: 'deepseek', model: 'deepseek-v4-flash' }, undefined)
+++    const resolved = resolveChildAgentOptions(parent, undefined, 1)
+++    expect(resolved).toEqual({ provider: 'deepseek', model: 'deepseek-v4-flash', subagentDepth: 1 })
+++  })
+++
+++  it('lets per-child overrides win over the inherited live route', () => {
+++    const parent = makeParent(
+++      { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+++      { provider: 'deepseek', model: 'deepseek-v4-pro' },
+++    )
+++    const resolved = resolveChildAgentOptions(parent, { provider: 'opencode', model: 'big-pickle' }, 3)
+++    expect(resolved).toEqual({ provider: 'opencode', model: 'big-pickle', subagentDepth: 3 })
+++  })
+++})
+ diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+ index 737a21eea64d9ab25ed35258719442ae55376710..bd366be6b0ae2e567e646ef1b5c92f4b61b75452 100644
+ --- a/pnpm-lock.yaml
+-- 
+2.39.5
+

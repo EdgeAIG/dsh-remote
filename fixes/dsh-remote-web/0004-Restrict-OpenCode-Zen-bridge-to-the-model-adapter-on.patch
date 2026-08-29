@@ -1,0 +1,189 @@
+From b021ba228d34f0a1b98ab2602185d0afa23884b7 Mon Sep 17 00:00:00 2001
+From: arena-ai-coding-agent <arena-ai-coding-agent@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 07:29:09 +0000
+Subject: [PATCH 4/4] Restrict OpenCode Zen bridge to the model adapter only
+
+Drop the anonymous Exa MCP web-search plugin from the OPENCODE_ZEN=1
+integration so the bridge installs and activates only
+@deepseek-ai/dsh-llm-opencode. Also keep the adapter normalizations: named
+exports only (remove export default apply) and SSE tool-call name overwrite
+instead of accumulation, which otherwise produces web_searchweb_search and
+breaks model tool calls.
+---
+ README.md                     |  4 +++-
+ docs/index.html               |  2 +-
+ install.sh                    | 16 +++++--------
+ tools/enable-opencode-zen.mjs | 45 ++++++++++++++++++++---------------
+ 4 files changed, 36 insertions(+), 31 deletions(-)
+
+diff --git a/README.md b/README.md
+index 567345e..1fca0d9 100644
+--- a/README.md
++++ b/README.md
+@@ -23,7 +23,7 @@ BUILD=0 ./install.sh "$HOME/dsh-remote-web"
+ 
+ ### Opt-in OpenCode Zen bridge
+ 
+-Pass `OPENCODE_ZEN=1` to also add the [DSH OpenCode Zen bridge](https://github.com/DHS-M/dsh-opencode-zen) from the same organization. It installs the standalone `@deepseek-ai/dsh-llm-opencode` adapter, the anonymous Exa MCP web-search plugin, and points the default agent model at `opencode-zen` / `big-pickle` through a local loopback route.
++Pass `OPENCODE_ZEN=1` to also add the [DSH OpenCode Zen bridge](https://github.com/DHS-M/dsh-opencode-zen) from the same organization. It installs only the standalone `@deepseek-ai/dsh-llm-opencode` model adapter and points the default agent model at `opencode-zen` / `big-pickle` through a local loopback route. Web-search plugins are intentionally excluded.
+ 
+ ```bash
+ OPENCODE_ZEN=1 BUILD=1 ./install.sh "$HOME/dsh-remote-web"
+@@ -37,6 +37,8 @@ node <dsh-opencode-zen>/zen_shim.js
+ 
+ If you are not calling the real OpenCode Zen endpoint, the bridge still works against an OpenAI-compatible `/v1` server bound to `http://127.0.0.1:8791`.
+ 
++The enable step also normalizes the upstream standalone adapter's SSE tool-call name handling (`state.name += …` → `state.name = …`). Without that fix a normal one-chunk `web_search` tool call is recorded as `web_searchweb_search` and rejected as an unknown tool. The adapter still removes the DSH-incompatible `export default apply` so the Cordis loader reads its named `inject`/`name` metadata.
++
+ ## Run the web interface
+ 
+ ```bash
+diff --git a/docs/index.html b/docs/index.html
+index 65849f0..d8b7e0c 100644
+--- a/docs/index.html
++++ b/docs/index.html
+@@ -20,7 +20,7 @@
+   <pre><code>curl -fsSL https://raw.githubusercontent.com/DHS-M/dsh-remote-web/main/install.sh -o install.sh
+ chmod +x install.sh
+ BUILD=1 ./install.sh "$HOME/dsh-remote-web"</code></pre>
+-  <p>Add the DSH OpenCode Zen bridge from the same organization with <code>OPENCODE_ZEN=1</code>. It installs the standalone <code>@deepseek-ai/dsh-llm-opencode</code> adapter, the anonymous Exa MCP web-search plugin, and points the default model at <code>opencode-zen</code> / <code>big-pickle</code> through a local loopback route:</p>
++  <p>Add the DSH OpenCode Zen bridge from the same organization with <code>OPENCODE_ZEN=1</code>. It installs only the standalone <code>@deepseek-ai/dsh-llm-opencode</code> model adapter and points the default model at <code>opencode-zen</code> / <code>big-pickle</code> through a local loopback route. Web-search plugins are excluded:</p>
+   <pre><code>OPENCODE_ZEN=1 BUILD=1 ./install.sh "$HOME/dsh-remote-web"
+ node &lt;dsh-opencode-zen&gt;/zen_shim.js</code></pre>
+   <h2>Run the browser interface</h2>
+diff --git a/install.sh b/install.sh
+index 7d36248..80f52b5 100755
+--- a/install.sh
++++ b/install.sh
+@@ -9,8 +9,8 @@ PATCH_FILE="$SCRIPT_DIR/patches/open-authority-web-only.patch"
+ TARGET_DIR="${1:-$PWD/deepseek-harness-remote}"
+ BUILD="${BUILD:-1}"
+ # Opt-in OpenCode Zen bridge (DHS-M/dsh-opencode-zen). It adds the standalone
+-# @deepseek-ai/dsh-llm-opencode adapter and the anonymous Exa MCP web-search
+-# plugin and points the default agent model at the local shim route.
++# @deepseek-ai/dsh-llm-opencode model adapter only (no web-search plugin) and
++# points the default agent model at the local shim route.
+ OPENCODE_ZEN="${OPENCODE_ZEN:-0}"
+ 
+ if [[ -e "$TARGET_DIR" ]]; then
+@@ -32,7 +32,8 @@ if [[ "$OPENCODE_ZEN" == "1" ]]; then
+   ZEN_SOURCE="$TARGET_DIR/.dsh-opencode-zen"
+   git clone "$OPENCODE_ZEN_REPO" "$ZEN_SOURCE"
+ 
+-  # Standalone LLM adapter (packages/llm/llm-opencode).
++  # Standalone LLM adapter (packages/llm/llm-opencode). This is the only plugin
++  # the bridge adds; web search is intentionally excluded.
+   cp -R "$ZEN_SOURCE/package/src" "$TARGET_DIR/packages/llm/llm-opencode/src"
+   cp -R "$ZEN_SOURCE/package/tests" "$TARGET_DIR/packages/llm/llm-opencode/tests"
+   cp "$ZEN_SOURCE/package/package.json" "$TARGET_DIR/packages/llm/llm-opencode/package.json"
+@@ -43,13 +44,8 @@ if [[ "$OPENCODE_ZEN" == "1" ]]; then
+   # without inject". Remove that default export when adapting it.
+   sed -i '/^export default apply$/d' "$TARGET_DIR/packages/llm/llm-opencode/src/index.ts"
+ 
+-  # Anonymous Exa MCP web-search plugin (packages/web/web-search-exa-mcp).
+-  cp -R "$ZEN_SOURCE/package/web-search-exa-mcp/src" "$TARGET_DIR/packages/web/web-search-exa-mcp/src"
+-  cp -R "$ZEN_SOURCE/package/web-search-exa-mcp/tests" "$TARGET_DIR/packages/web/web-search-exa-mcp/tests"
+-  cp "$ZEN_SOURCE/package/web-search-exa-mcp/package.json" "$TARGET_DIR/packages/web/web-search-exa-mcp/package.json"
+-  cp "$ZEN_SOURCE/package/web-search-exa-mcp/tsconfig.json" "$TARGET_DIR/packages/web/web-search-exa-mcp/tsconfig.json"
+-
+-  # Register the new packages in the bundle manifests.
++  # Register the new package in the bundle manifests and normalize the
++  # adapter's SSE tool-call name handling.
+   node "$SCRIPT_DIR/tools/enable-opencode-zen.mjs" "$TARGET_DIR"
+ 
+   # The lockfile does not know about the new workspace members, so install
+diff --git a/tools/enable-opencode-zen.mjs b/tools/enable-opencode-zen.mjs
+index c818ffb..bfcb701 100644
+--- a/tools/enable-opencode-zen.mjs
++++ b/tools/enable-opencode-zen.mjs
+@@ -3,13 +3,14 @@
+  * Wire the DSH OpenCode Zen bridge into a checkout produced by install.sh.
+  *
+  * This mutates the workspace manifests and the active base web composition so
+- * that the standalone `@deepseek-ai/dsh-llm-opencode` adapter and the anonymous
+- * Exa MCP web-search plugin are recognized, type-checked, and mounted. It is
+- * idempotent: running it on a checkout that already has the bridge enabled is a
+- * no-op for every change it already applied.
++ * that the standalone `@deepseek-ai/dsh-llm-opencode` model adapter is
++ * recognized, type-checked, and mounted. Web-search plugins are intentionally
++ * excluded; this enables the model route only. It is idempotent: running it on
++ * a checkout that already has the bridge enabled is a no-op for every change
++ * it already applied.
+  */
+ 
+-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
++import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+ import { join } from 'node:path'
+ 
+ const root = process.argv[2]
+@@ -33,23 +34,20 @@ function addTsReference(tsconfigPath, ref) {
+   let text = readFileSync(tsconfigPath, 'utf8')
+   if (text.includes(ref)) return
+   const needle = '    { "path": "./packages/llm/llm-pi-ai" }'
+-  if (ref.includes('/llm/llm-opencode') && text.includes(needle)) {
++  if (text.includes(needle)) {
+     text = text.replace(needle, needle + ',\n    { "path": ' + JSON.stringify(ref) + ' }', 1)
+   } else {
+-    const exaNeedle = '    { "path": "./packages/web/web-search-exa" }'
+-    text = text.replace(exaNeedle, exaNeedle + ',\n    { "path": ' + JSON.stringify(ref) + ' }', 1)
++    const llmNeedle = '    { "path": "./packages/llm/llm-deepseek" }'
++    text = text.replace(llmNeedle, llmNeedle + ',\n    { "path": ' + JSON.stringify(ref) + ' }', 1)
+   }
+   writeFileSync(tsconfigPath, text)
+ }
+ 
+ const basePkg = join(root, 'packages/bundle/base/package.json')
+-const webAppPkg = join(root, 'packages/bundle/web-app/package.json')
+ addWorkspaceDep(basePkg, '@deepseek-ai/dsh-llm-opencode')
+-addWorkspaceDep(webAppPkg, '@deepseek-ai/dsh-web-search-exa-mcp')
+ 
+ const tsconfigHost = join(root, 'tsconfig.host.json')
+ addTsReference(tsconfigHost, './packages/llm/llm-opencode')
+-addTsReference(tsconfigHost, './packages/web/web-search-exa-mcp')
+ 
+ const baseCordis = join(root, 'packages/bundle/base/cordis.patch.yml')
+ let base = readFileSync(baseCordis, 'utf8')
+@@ -59,7 +57,7 @@ base = base
+   .replace('provider: deepseek\n        model: deepseek-v4-flash', 'provider: opencode-zen\n        model: big-pickle')
+   .replace('provider: deepseek\n        model: deepseek-v4-flash', 'provider: opencode-zen\n        model: big-pickle')
+ 
+-// Mount the standalone adapter and the web-search plugin rows.
++// Mount the standalone model adapter row.
+ if (!base.includes('id: llm-opencode')) {
+   const anchor = '    - id: llm-pi-ai\n      name: \'@deepseek-ai/dsh-llm-pi-ai\'\n'
+   const rows = anchor + `
+@@ -78,15 +76,24 @@ if (!base.includes('id: llm-opencode')) {
+ `
+   base = base.replace(anchor, rows, 1)
+ }
+-if (!base.includes('id: web-search-exa-mcp')) {
+-  const webAnchor = '      name: \'@deepseek-ai/dsh-web\'\n'
+-  const row = `      name: '@deepseek-ai/dsh-web'\n\n    - id: web-search-exa-mcp\n      name: '@deepseek-ai/dsh-web-search-exa-mcp'\n      config:\n        endpoint: https://mcp.exa.ai/mcp\n        tool: web_search_exa\n`
+-  base = base.replace(webAnchor, row, 1)
+-}
+ writeFileSync(baseCordis, base)
+ 
+-// Make sure the package directories exist (install.sh already copies them).
++// Make sure the package directory exists (install.sh already copies it).
+ mkdirSync(join(root, 'packages/llm/llm-opencode'), { recursive: true })
+-mkdirSync(join(root, 'packages/web/web-search-exa-mcp'), { recursive: true })
++
++// The upstream standalone adapter accumulates the function name across SSE
++// chunks (`state.name += raw.function.name`), so a normal one-chunk tool name
++// becomes `web_searchweb_search` and every call fails as an unknown tool. The
++// adapter must overwrite the name, matching the DeepSeek translation path.
++const adapterDir = join(root, 'packages/llm/llm-opencode')
++for (const rel of ['src/index.ts', 'lib/index.js']) {
++  const file = join(adapterDir, rel)
++  if (!existsSync(file)) continue
++  const text = readFileSync(file, 'utf8')
++  const updated = text
++    .replace('state.name += raw.function.name', 'state.name = raw.function.name')
++    .replace('state.name += raw.function.name;', 'state.name = raw.function.name;')
++  if (updated !== text) writeFileSync(file, updated)
++}
+ 
+ console.log('Enabled DSH OpenCode Zen bridge in', root)
+-- 
+2.39.5
+

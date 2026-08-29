@@ -1,0 +1,262 @@
+From 8c554e68a83b6510c9412794ba50de09511fc96e Mon Sep 17 00:00:00 2001
+From: arena-ai-coding-agent <arena-ai-coding-agent@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 07:09:44 +0000
+Subject: [PATCH 2/4] Add opt-in DSH OpenCode Zen bridge
+
+ONCODE_ZEN=1 now installs the DHS-M/dsh-opencode-zen integration alongside the
+product patch:
+- copies the standalone @deepseek-ai/dsh-llm-opencode adapter and the anonymous
+  Exa MCP web-search plugin into the harness workspace
+- registers both in the base/web-app bundle manifests and the host TS project
+- points the default agent model at opencode-zen / big-pickle through the local
+  shim route
+- documents the opt-in flag in README and docs
+
+The OpenCode Zen adapter must use named exports only; its upstream source
+currently ends with 'export default apply', which makes the DSH Cordis loader
+ignore inject/name metadata. install.sh removes that default export when
+adapting the package.
+---
+ README.md                     | 16 ++++++
+ docs/index.html               |  3 ++
+ install.sh                    | 68 +++++++++++++++++++++++---
+ tools/enable-opencode-zen.mjs | 92 +++++++++++++++++++++++++++++++++++
+ 4 files changed, 173 insertions(+), 6 deletions(-)
+ create mode 100644 tools/enable-opencode-zen.mjs
+
+diff --git a/README.md b/README.md
+index 3d51f81..567345e 100644
+--- a/README.md
++++ b/README.md
+@@ -21,6 +21,22 @@ The installer can skip the build when you only need to inspect the patched check
+ BUILD=0 ./install.sh "$HOME/dsh-remote-web"
+ ```
+ 
++### Opt-in OpenCode Zen bridge
++
++Pass `OPENCODE_ZEN=1` to also add the [DSH OpenCode Zen bridge](https://github.com/DHS-M/dsh-opencode-zen) from the same organization. It installs the standalone `@deepseek-ai/dsh-llm-opencode` adapter, the anonymous Exa MCP web-search plugin, and points the default agent model at `opencode-zen` / `big-pickle` through a local loopback route.
++
++```bash
++OPENCODE_ZEN=1 BUILD=1 ./install.sh "$HOME/dsh-remote-web"
++```
++
++Start the Zen shim (or any OpenAI-compatible endpoint) before using the route:
++
++```bash
++node <dsh-opencode-zen>/zen_shim.js
++```
++
++If you are not calling the real OpenCode Zen endpoint, the bridge still works against an OpenAI-compatible `/v1` server bound to `http://127.0.0.1:8791`.
++
+ ## Run the web interface
+ 
+ ```bash
+diff --git a/docs/index.html b/docs/index.html
+index 70fa78b..65849f0 100644
+--- a/docs/index.html
++++ b/docs/index.html
+@@ -20,6 +20,9 @@
+   <pre><code>curl -fsSL https://raw.githubusercontent.com/DHS-M/dsh-remote-web/main/install.sh -o install.sh
+ chmod +x install.sh
+ BUILD=1 ./install.sh "$HOME/dsh-remote-web"</code></pre>
++  <p>Add the DSH OpenCode Zen bridge from the same organization with <code>OPENCODE_ZEN=1</code>. It installs the standalone <code>@deepseek-ai/dsh-llm-opencode</code> adapter, the anonymous Exa MCP web-search plugin, and points the default model at <code>opencode-zen</code> / <code>big-pickle</code> through a local loopback route:</p>
++  <pre><code>OPENCODE_ZEN=1 BUILD=1 ./install.sh "$HOME/dsh-remote-web"
++node &lt;dsh-opencode-zen&gt;/zen_shim.js</code></pre>
+   <h2>Run the browser interface</h2>
+   <pre><code>cd "$HOME/dsh-remote-web"
+ pnpm dsh web --host 0.0.0.0 --open-authority --no-open</code></pre>
+diff --git a/install.sh b/install.sh
+index c3b2541..7d36248 100755
+--- a/install.sh
++++ b/install.sh
+@@ -3,10 +3,15 @@ set -Eeuo pipefail
+ 
+ UPSTREAM_URL="${UPSTREAM_URL:-https://github.com/deepseek-ai/deepseek-harness.git}"
+ UPSTREAM_COMMIT="${UPSTREAM_COMMIT:-b150a551b8d465e31e418e1b2eaf5e79bbb7d28e}"
++OPENCODE_ZEN_REPO="${OPENCODE_ZEN_REPO:-https://github.com/DHS-M/dsh-opencode-zen.git}"
+ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ PATCH_FILE="$SCRIPT_DIR/patches/open-authority-web-only.patch"
+ TARGET_DIR="${1:-$PWD/deepseek-harness-remote}"
+ BUILD="${BUILD:-1}"
++# Opt-in OpenCode Zen bridge (DHS-M/dsh-opencode-zen). It adds the standalone
++# @deepseek-ai/dsh-llm-opencode adapter and the anonymous Exa MCP web-search
++# plugin and points the default agent model at the local shim route.
++OPENCODE_ZEN="${OPENCODE_ZEN:-0}"
+ 
+ if [[ -e "$TARGET_DIR" ]]; then
+   echo "Target already exists: $TARGET_DIR" >&2
+@@ -21,8 +26,40 @@ cd "$TARGET_DIR"
+ git checkout --detach "$UPSTREAM_COMMIT"
+ echo "Applying the remote/web-only product patch..."
+ git apply --3way "$PATCH_FILE"
+-echo "Installing dependencies..."
+-pnpm install --frozen-lockfile
++
++if [[ "$OPENCODE_ZEN" == "1" ]]; then
++  echo "Adding DSH OpenCode Zen bridge..."
++  ZEN_SOURCE="$TARGET_DIR/.dsh-opencode-zen"
++  git clone "$OPENCODE_ZEN_REPO" "$ZEN_SOURCE"
++
++  # Standalone LLM adapter (packages/llm/llm-opencode).
++  cp -R "$ZEN_SOURCE/package/src" "$TARGET_DIR/packages/llm/llm-opencode/src"
++  cp -R "$ZEN_SOURCE/package/tests" "$TARGET_DIR/packages/llm/llm-opencode/tests"
++  cp "$ZEN_SOURCE/package/package.json" "$TARGET_DIR/packages/llm/llm-opencode/package.json"
++  cp "$ZEN_SOURCE/package/tsconfig.json" "$TARGET_DIR/packages/llm/llm-opencode/tsconfig.json"
++  # DSH namespace plugins must use named exports only. The upstream package
++  # currently ends with `export default apply`, which makes the Cordis loader
++  # ignore its `inject`/`name` metadata and fail with "cannot get property llm
++  # without inject". Remove that default export when adapting it.
++  sed -i '/^export default apply$/d' "$TARGET_DIR/packages/llm/llm-opencode/src/index.ts"
++
++  # Anonymous Exa MCP web-search plugin (packages/web/web-search-exa-mcp).
++  cp -R "$ZEN_SOURCE/package/web-search-exa-mcp/src" "$TARGET_DIR/packages/web/web-search-exa-mcp/src"
++  cp -R "$ZEN_SOURCE/package/web-search-exa-mcp/tests" "$TARGET_DIR/packages/web/web-search-exa-mcp/tests"
++  cp "$ZEN_SOURCE/package/web-search-exa-mcp/package.json" "$TARGET_DIR/packages/web/web-search-exa-mcp/package.json"
++  cp "$ZEN_SOURCE/package/web-search-exa-mcp/tsconfig.json" "$TARGET_DIR/packages/web/web-search-exa-mcp/tsconfig.json"
++
++  # Register the new packages in the bundle manifests.
++  node "$SCRIPT_DIR/tools/enable-opencode-zen.mjs" "$TARGET_DIR"
++
++  # The lockfile does not know about the new workspace members, so install
++  # from scratch rather than using the frozen lockfile.
++  echo "Installing dependencies (including OpenCode Zen bridge)..."
++  pnpm install
++else
++  echo "Installing dependencies..."
++  pnpm install --frozen-lockfile
++fi
+ 
+ if [[ "$BUILD" == "1" ]]; then
+   echo "Building client libraries, host libraries, and web assets..."
+@@ -33,7 +70,26 @@ fi
+ 
+ echo
+ echo "Installation complete: $TARGET_DIR"
+-echo "Run locally:"
+-echo "  pnpm dsh web --host 0.0.0.0 --open-authority --no-open"
+-echo ""
+-echo "Security note: open-authority grants every reachable caller host authority."
++if [[ "$OPENCODE_ZEN" == "1" ]]; then
++  cat <<'EOF'
++
++OpenCode Zen bridge is enabled. To use it:
++
++  1. Start the local shim (or your own OpenAI-compatible endpoint):
++       node <dsh-opencode-zen>/zen_shim.js
++  2. Run the web interface:
++       pnpm dsh web --host 0.0.0.0 --open-authority --no-open
++  3. The default agent model is opencode-zen / big-pickle (see the Models
++     page if you want a different free model).
++
++Security note: open-authority grants every reachable caller host authority.
++EOF
++else
++  cat <<'EOF'
++
++Run locally:
++  pnpm dsh web --host 0.0.0.0 --open-authority --no-open
++
++Security note: open-authority grants every reachable caller host authority.
++EOF
++fi
+diff --git a/tools/enable-opencode-zen.mjs b/tools/enable-opencode-zen.mjs
+new file mode 100644
+index 0000000..c818ffb
+--- /dev/null
++++ b/tools/enable-opencode-zen.mjs
+@@ -0,0 +1,92 @@
++#!/usr/bin/env node
++/**
++ * Wire the DSH OpenCode Zen bridge into a checkout produced by install.sh.
++ *
++ * This mutates the workspace manifests and the active base web composition so
++ * that the standalone `@deepseek-ai/dsh-llm-opencode` adapter and the anonymous
++ * Exa MCP web-search plugin are recognized, type-checked, and mounted. It is
++ * idempotent: running it on a checkout that already has the bridge enabled is a
++ * no-op for every change it already applied.
++ */
++
++import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
++import { join } from 'node:path'
++
++const root = process.argv[2]
++if (!root) throw new Error('usage: node tools/enable-opencode-zen.mjs <harness-checkout>')
++
++function readJson(path) {
++  return JSON.parse(readFileSync(path, 'utf8'))
++}
++function writeJson(path, value) {
++  writeFileSync(path, JSON.stringify(value, null, 2) + '\n')
++}
++function addWorkspaceDep(manifestPath, name) {
++  const manifest = readJson(manifestPath)
++  const deps = manifest.dependencies ?? {}
++  if (!(name in deps)) deps[name] = 'workspace:^'
++  manifest.dependencies = Object.fromEntries(Object.entries(deps).sort(([a], [b]) => a.localeCompare(b)))
++  writeJson(manifestPath, manifest)
++}
++function addTsReference(tsconfigPath, ref) {
++  if (!ref.startsWith('./')) ref = './' + ref
++  let text = readFileSync(tsconfigPath, 'utf8')
++  if (text.includes(ref)) return
++  const needle = '    { "path": "./packages/llm/llm-pi-ai" }'
++  if (ref.includes('/llm/llm-opencode') && text.includes(needle)) {
++    text = text.replace(needle, needle + ',\n    { "path": ' + JSON.stringify(ref) + ' }', 1)
++  } else {
++    const exaNeedle = '    { "path": "./packages/web/web-search-exa" }'
++    text = text.replace(exaNeedle, exaNeedle + ',\n    { "path": ' + JSON.stringify(ref) + ' }', 1)
++  }
++  writeFileSync(tsconfigPath, text)
++}
++
++const basePkg = join(root, 'packages/bundle/base/package.json')
++const webAppPkg = join(root, 'packages/bundle/web-app/package.json')
++addWorkspaceDep(basePkg, '@deepseek-ai/dsh-llm-opencode')
++addWorkspaceDep(webAppPkg, '@deepseek-ai/dsh-web-search-exa-mcp')
++
++const tsconfigHost = join(root, 'tsconfig.host.json')
++addTsReference(tsconfigHost, './packages/llm/llm-opencode')
++addTsReference(tsconfigHost, './packages/web/web-search-exa-mcp')
++
++const baseCordis = join(root, 'packages/bundle/base/cordis.patch.yml')
++let base = readFileSync(baseCordis, 'utf8')
++
++// Default agent model -> the bridge route.
++base = base
++  .replace('provider: deepseek\n        model: deepseek-v4-flash', 'provider: opencode-zen\n        model: big-pickle')
++  .replace('provider: deepseek\n        model: deepseek-v4-flash', 'provider: opencode-zen\n        model: big-pickle')
++
++// Mount the standalone adapter and the web-search plugin rows.
++if (!base.includes('id: llm-opencode')) {
++  const anchor = '    - id: llm-pi-ai\n      name: \'@deepseek-ai/dsh-llm-pi-ai\'\n'
++  const rows = anchor + `
++    # OpenCode Zen bridge: local shim-backed free-model adapter (DHS-M/dsh-opencode-zen).
++    - id: llm-opencode
++      name: '@deepseek-ai/dsh-llm-opencode'
++      config:
++        baseURL: http://127.0.0.1:8791/v1
++        autoDiscover: true
++        freeOnly: true
++        models:
++          - id: big-pickle
++            name: Big Pickle
++            contextWindow: 200000
++            maxTokens: 32000
++`
++  base = base.replace(anchor, rows, 1)
++}
++if (!base.includes('id: web-search-exa-mcp')) {
++  const webAnchor = '      name: \'@deepseek-ai/dsh-web\'\n'
++  const row = `      name: '@deepseek-ai/dsh-web'\n\n    - id: web-search-exa-mcp\n      name: '@deepseek-ai/dsh-web-search-exa-mcp'\n      config:\n        endpoint: https://mcp.exa.ai/mcp\n        tool: web_search_exa\n`
++  base = base.replace(webAnchor, row, 1)
++}
++writeFileSync(baseCordis, base)
++
++// Make sure the package directories exist (install.sh already copies them).
++mkdirSync(join(root, 'packages/llm/llm-opencode'), { recursive: true })
++mkdirSync(join(root, 'packages/web/web-search-exa-mcp'), { recursive: true })
++
++console.log('Enabled DSH OpenCode Zen bridge in', root)
+-- 
+2.39.5
+
